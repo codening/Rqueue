@@ -1,0 +1,157 @@
+#!/usr/bin/env php
+<?php
+define("DS", DIRECTORY_SEPARATOR);
+define("RQUEUE_ROOT_DIR", __DIR__);
+define("RQUEUE_WORK_DIR", RQUEUE_ROOT_DIR.DS."Workers".DS);
+define("RQUEUE_PID_FILE", RQUEUE_ROOT_DIR.DS."temp".DS."rqueue.pid");
+
+try {
+	include(RQUEUE_ROOT_DIR.DS."Lib".DS."Rlog".DS."Rlog.php");
+
+	$Rlog = Rlog::instance(array('DRIVER'=>'file', 'LOG_PATH'=>RQUEUE_ROOT_DIR.DS."logs", 'LOG_MULTI'=>false));
+	// $Rlog->debug('server',"nihaowa");
+
+	if(empty($argv[1]))
+	{
+	    echo "Usage: Rqueue {start|stop|restart|reload|kill|status}".PHP_EOL;
+	    exit;
+	}
+
+	$cmd = $argv[1];
+
+	if(0 === strpos(strtolower(PHP_OS), 'win'))
+	{
+	    exit("Rqueue can not run on Windows operating system".PHP_EOL);
+	}
+
+	if (version_compare(PHP_VERSION,'5.3.0','<'))
+	{
+	    exit("Rqueue PHP >= 5.3.0 required ".PHP_EOL);
+	}
+
+	// 载入work基类
+	include(RQUEUE_ROOT_DIR.DS."Lib".DS."Rqueue.php");
+	
+
+	switch ($cmd) {
+		case 'start':
+			$workers_file = get_worker_file();
+
+			$Rlog->info('server',"Rqueued is starting ...");
+			// 设置log日志
+			Rqueue::set_log($Rlog);
+			// 作为daemonize启动
+			Rqueue::daemonize();
+			// 生成pid文件
+			Rqueue::save_pid();
+			// 安装信号
+        	Rqueue::install_signal();
+
+        	// 循环生成work
+			foreach ($workers_file as $file) {
+				include(RQUEUE_WORK_DIR.DS.$file);
+				$f_name = trim($file, '.php');
+				$_obj = new $f_name();
+				if ($_obj instanceof Rqueue) {
+					Rqueue::create_work($_obj);
+				} else {
+					$Rlog->notice('server', $file.' is not extends Rqueue');
+				}
+			}
+			// 主循环
+			Rqueue::loop();
+			exit(0);
+			break;
+		case 'stop':
+			$pid = @file_get_contents(RQUEUE_PID_FILE);
+	        if(empty($pid))
+	        {
+	            exit("\033[33;40mRqueued not running?\033[0m\n");
+	        }
+	        stop_and_wait();
+			break;
+		case 'reload':
+			$pid = @file_get_contents(RQUEUE_PID_FILE);
+	        if(empty($pid))
+	        {
+	            exit("\033[33;40mRqueued not running?\033[0m\n");
+	        }
+
+			posix_kill($pid, SIGHUP);
+			echo "reload Rqueued\n";
+			break;
+		case 'status':
+			var_dump(Rqueue::$pid_workers);
+			break;
+		default:
+			# code...
+			break;
+	}
+	// $Rlog->debug('server', $cmd);
+
+}
+
+catch(Exception $e) {
+	echo $e->getMessage();
+}
+
+function stop_and_wait($wait_time = 6)
+{
+    $pid = @file_get_contents(RQUEUE_PID_FILE);
+    if(empty($pid))
+    {
+        //exit("server not running?\n");
+    }
+    else
+    {
+        $start_time = time();
+        posix_kill($pid, SIGINT);
+        while(is_file(RQUEUE_PID_FILE))
+        {
+            clearstatcache();
+            usleep(1000);
+            if(time()-$start_time >= $wait_time)
+            {
+                force_kill();
+                force_kill();
+                unlink(RQUEUE_PID_FILE);
+                usleep(500000);
+                break;
+            }
+        }
+        echo "Rqueue is stoped".PHP_EOL;
+    }
+}
+
+function force_kill()
+{
+    $ret = $match = array();
+    exec("ps aux | grep -E 'Rqueued' | grep -v grep", $ret);
+    $this_pid = posix_getpid();
+    $this_ppid = posix_getppid();
+    foreach($ret as $line)
+    {
+        if(preg_match("/^[\S]+\s+(\d+)\s+/", $line, $match))
+        {
+            $tmp_pid = $match[1];
+            if($this_pid != $tmp_pid && $this_ppid != $tmp_pid)
+            {
+                posix_kill($tmp_pid, SIGKILL);
+            }
+        }
+    }
+}
+
+function get_worker_file()
+{
+	if (!is_dir(RQUEUE_WORK_DIR)) exit(RQUEUE_WORK_DIR." dir is not found.");
+	$Workers = array();
+	$_Workers = scandir(RQUEUE_WORK_DIR);
+	foreach ($_Workers as $file) {
+		if (is_file(RQUEUE_WORK_DIR.DS.$file)) {
+			$Workers[] = $file;
+		}
+	}
+	if (empty($Workers)) exit(RQUEUE_WORK_DIR." is not found file");
+	return $Workers;
+}
