@@ -43,42 +43,42 @@ abstract class Rlog
 
 	public function emerg($type, $message, $context='')
 	{
-		$this->save(RLog_level::EMERG, $type, $message, $context);
+		return $this->save(RLog_level::EMERG, $type, $message, $context);
 	}
 
 	public function alert($type, $message, $context='')
 	{
-		$this->save(RLog_level::ALERT, $type, $message, $context);
+		return $this->save(RLog_level::ALERT, $type, $message, $context);
 	}
 
 	public function crit($type, $message, $context='')
 	{
-		$this->save(RLog_level::CRIT, $type, $message, $context);
+		return $this->save(RLog_level::CRIT, $type, $message, $context);
 	}
 
 	public function error($type, $message, $context='')
 	{
-		$this->save(RLog_level::ERROR, $type, $message, $context);
+		return $this->save(RLog_level::ERROR, $type, $message, $context);
 	}
 
 	public function warn($type, $message, $context='')
 	{
-		$this->save(RLog_level::WARN, $type, $message, $context);
+		return $this->save(RLog_level::WARN, $type, $message, $context);
 	}
 
 	public function notice($type, $message, $context='')
 	{
-		$this->save(RLog_level::NOTICE, $type, $message, $context);
+		return $this->save(RLog_level::NOTICE, $type, $message, $context);
 	}
 
 	public function info($type, $message, $context='')
 	{
-		$this->save(RLog_level::INFO, $type, $message, $context);
+		return $this->save(RLog_level::INFO, $type, $message, $context);
 	}
 
 	public function debug($type, $message, $context='')
 	{
-		$this->save(RLog_level::DEBUG, $type, $message, $context);
+		return $this->save(RLog_level::DEBUG, $type, $message, $context);
 	}
 
 	public function __call($method, $args)
