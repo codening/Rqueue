@@ -1,12 +1,45 @@
 <?php
 abstract class Rqueue
 {
-	public static $Rlog = null;
+    /**
+     * 服务状态 启动中
+     * @var integer
+     */ 
+    const STATUS_STARTING = 1;
+    
+    /**
+     * 服务状态 运行中
+     * @var integer
+     */
+    const STATUS_RUNNING = 2;
+    
+    /**
+     * 服务状态 关闭中
+     * @var integer
+     */
+    const STATUS_SHUTDOWN = 4;
+    
+    /**
+     * 服务状态 平滑重启中
+     * @var integer
+     */
+    const STATUS_RESTARTING_WORKERS = 8;
 
-	public static $masterPid = 0;
+    // log类
+    public static $Rlog = null;
 
-	// 子进程map,array('pid'=>array('work_name'=>'abc', 'start_time'=>0, 'restart_time'=>0, 'restart_count'=>0))
-	public static $pid_workers = array();
+    // 主进程id
+    public static $master_pid = 0;
+
+    // 服务运行状态
+    public static $service_status = self::STATUS_STARTING;
+
+
+	// 子进程map,array('pid'=>'worker_name')
+	public static $pid_worker = array();
+
+    // 子进程信息 array('worker_name'=>array('pid'=>0, 'restart_time'=>0, 'restart_count'=>0))
+    public static $worker_info = array();
 
 	public static function set_log($log)
 	{
@@ -63,22 +96,69 @@ abstract class Rqueue
     public static function save_pid()
     {
         // 保存在变量中
-        self::$masterPid = posix_getpid();
+        self::$master_pid = posix_getpid();
         
         // 保存到文件中，用于实现停止、重启
-        if(false === @file_put_contents(RQUEUE_PID_FILE, self::$masterPid))
+        if(false === @file_put_contents(RQUEUE_PID_FILE, self::$master_pid))
         {
-            exit("\033[31;40mCan not save pid to pid-file(" . RQUEUE_PID_FILE . ")\033[0m\n\n\033[31;40mServer start fail\033[0m\n\n");
+            exit("\033[31;40mCan not save pid to pid-file(" . RQUEUE_PID_FILE . ")\033[0m\n\n\033[31;40mService start fail\033[0m\n\n");
         }
         
         // 更改权限
         chmod(RQUEUE_PID_FILE, 0644);
     }
 
+    public static function run()
+    {
+        static::$Rlog->info('server',"Rqueued is starting ...");
+        echo 'Rqueued is starting ...'.PHP_EOL;
+        // Rqueue初始化
+        self::init();
+        // 作为daemonize启动
+        self::daemonize();
+        // 生成pid文件
+        self::save_pid();
+        // 安装信号
+        self::install_signal();
+        // 生成works
+        self::spawn_workers();
+        // 标记服务为runing状态
+        self::$service_status = self::STATUS_RUNNING;
+        // 主循环
+        self::loop();
+        exit(0);
+    }
+
+    public static function init()
+    {
+        // 初始化共享内存
+        /*if(extension_loaded('sysvshm'))
+        {
+            self::$shm_id = shm_attach(IPC_KEY, DEFAULT_SHM_SIZE, 0666);
+        }*/
+    }
+
+    public static function spawn_workers()
+    {
+        $workers = self::get_worker_file();
+
+        // 循环生成work
+        foreach ($workers as $file) {
+            include(RQUEUE_WORK_DIR.DS.$file);
+            $f_name = trim($file, '.php');
+            $_obj = new $f_name();
+            if ($_obj instanceof Rqueue) {
+                self::create_work_one($_obj);
+            } else {
+                static::$Rlog->notice('server', $file.' is not extends Rqueue');
+            }
+        }
+    }
+
 	/**
 	 * 创建子进程
 	 */
-	public static function create_work($obj)
+	public static function create_work_one($obj)
 	{
 		$pid = pcntl_fork(); //创建子进程
 		
@@ -86,20 +166,21 @@ abstract class Rqueue
         pcntl_signal_dispatch();
 
 		if ($pid > 0) { //父进程
-			return $pid;
-		} else if ($pid == 0) {//子进程
-			// 子进程忽略所有信号
-			static::ignoreSignal();
-			$pid = posix_getpid();
+			// 将子进程的状态更新到变量中
+            $_class = get_class($obj);
+			static::$pid_worker[$pid] = $_class;
+            static::$worker_info[$_class]['pid'] = $pid;
+            static::$worker_info[$_class]['restart_time'] = isset(static::$worker_info[$_class]['restart_time']) ? time() : 0;
+            static::$worker_info[$_class]['restart_count'] = isset(static::$worker_info[$_class]['restart_count']) ? static::$worker_info[$_class]['restart_count']+1 : 0;
 
-			// 存入变量中
-			static::$pid_workers[$pid]['work_name'] = get_class($obj);
-			static::$pid_workers[$pid]['start_time'] = time();
-			static::$pid_workers[$pid]['restart_time'] = 0;
-			static::$pid_workers[$pid]['restart_count'] = 0;
-			static::$pid_workers[$pid]['status_name'] = 'runing';
+            return $pid;
+        } else if ($pid == 0) {//子进程
+            // 子进程忽略所有信号
+            static::ignore_signal();
+            $pid = posix_getpid();
+
 			static::$Rlog->info('server',"Process {$pid} was created");
-			echo PHP_EOL."\033[32;40m * Process ".static::$pid_workers[$pid]['work_name']." [{$pid}] is runing\033[0m\n";
+			echo PHP_EOL."\033[32;40m * Process ".get_class($obj)." [{$pid}] is runing\033[0m";
 			while(true)
 			{
 				$rt = $obj->work();
@@ -136,22 +217,46 @@ abstract class Rqueue
                 return $pid;
             }
 
-            // 重启退出的work
-            var_dump($pid);
-            // var_dump(static::$pid_workers);
-            // self::create_work(new static::$pid_workers[$pid]['work_name']());
+            // 如果服务是不是关闭中
+            if(self::$service_status != self::STATUS_SHUTDOWN)
+            {
+                sleep(5);
+                static::$Rlog->notice('server', 'process '.static::$pid_worker[$pid].' is restart.');
+
+                $_obj = new static::$pid_worker[$pid]();
+
+                // 删除被kill掉的进程信息
+                self::clear_work_info($pid);
+
+                if ($_obj instanceof Rqueue) {
+                    self::create_work_one($_obj);
+                } else {
+                    static::$Rlog->notice('server', $work_info[$pid]['work_name'].' is not extends Rqueue');
+                }
+            }
+            // 判断是否都重启完毕
+            else
+            {
+                // 发送提示
+                static::$Rlog->notice('server', "Rqueue is stoped");
+                // 删除pid文件
+                @unlink(RQUEUE_PID_FILE);
+                exit(0);
+            }//end if
 		}
-		/*$pid = pcntl_wait($status, WUNTRACED);;
-		if (pcntl_wifexited($status)) {
-			echo "\n\n* Sub process: {$pid} exited with {$status} ";
-		}*/
 	}
+
+    protected static function clear_work_info($pid)
+    {
+        unset(static::$pid_worker[$pid]);
+        return true;
+    }
 
 	/**
      * 忽略信号
      * @return void
      */
-    protected static function ignoreSignal()
+    protected static function ignore_signal()
     {
         // 设置忽略信号
         pcntl_signal(SIGPIPE, SIG_IGN);
@@ -178,7 +283,7 @@ abstract class Rqueue
             // 停止服务信号
             case SIGINT:
             	static::$Rlog->notice('server', 'Rqueue is shutting down');
-                self::all_stop();
+                self::stop_workers();
                 break;
             // 测试用
             case SIGUSR1:
@@ -247,7 +352,7 @@ abstract class Rqueue
     public static function restart_workers()
     {
     	// 向所有子进程发送重启信号
-        foreach(static::$pid_workers as $pid=>&$worker)
+        foreach(static::$pid_worker as $pid=>&$worker)
         {
         	$worker['restart_time'] = time();
         	$worker['restart_count'] = $worker['restart_count'] ++;
@@ -258,17 +363,31 @@ abstract class Rqueue
     }
 
     /**
-     * 终止所有进程
+     * 终止所有work进程
      */
-    public static function all_stop()
+    public static function stop_workers()
     {
     	// 如果没有子进程，则直接终止
-    	if (empty(static::$pid_workers)) exit(0);
+    	if (empty(static::$pid_worker)) exit(0);
     	// 向所有子进程发送终止信号
-        foreach(static::$pid_workers as $pid=>&$worker)
+        foreach(static::$pid_worker as $pid=>&$worker)
         {
             // 发送SIGINT信号
             posix_kill($pid, SIGINT);
         }
+    }
+
+    public static function get_worker_file()
+    {
+        if (!is_dir(RQUEUE_WORK_DIR)) exit(RQUEUE_WORK_DIR." dir is not found.");
+        $Workers = array();
+        $_Workers = scandir(RQUEUE_WORK_DIR);
+        foreach ($_Workers as $file) {
+            if (is_file(RQUEUE_WORK_DIR.DS.$file)) {
+                $Workers[] = $file;
+            }
+        }
+        if (empty($Workers)) exit(RQUEUE_WORK_DIR." is not found file");
+        return $Workers;
     }
 }

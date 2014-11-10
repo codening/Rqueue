@@ -4,6 +4,8 @@ define("DS", DIRECTORY_SEPARATOR);
 define("RQUEUE_ROOT_DIR", __DIR__);
 define("RQUEUE_WORK_DIR", RQUEUE_ROOT_DIR.DS."Workers".DS);
 define("RQUEUE_PID_FILE", RQUEUE_ROOT_DIR.DS."temp".DS."rqueue.pid");
+define('IPC_KEY', fileinode(RQUEUE_ROOT_DIR));
+define('DEFAULT_SHM_SIZE', 393216);
 
 try {
 	include(RQUEUE_ROOT_DIR.DS."Lib".DS."Rlog".DS."Rlog.php");
@@ -35,32 +37,10 @@ try {
 
 	switch ($cmd) {
 		case 'start':
-			$workers_file = get_worker_file();
-
-			$Rlog->info('server',"Rqueued is starting ...");
+			// $workers_file = get_worker_file();
 			// 设置log日志
 			Rqueue::set_log($Rlog);
-			// 作为daemonize启动
-			Rqueue::daemonize();
-			// 生成pid文件
-			Rqueue::save_pid();
-			// 安装信号
-        	Rqueue::install_signal();
-
-        	// 循环生成work
-			foreach ($workers_file as $file) {
-				include(RQUEUE_WORK_DIR.DS.$file);
-				$f_name = trim($file, '.php');
-				$_obj = new $f_name();
-				if ($_obj instanceof Rqueue) {
-					Rqueue::create_work($_obj);
-				} else {
-					$Rlog->notice('server', $file.' is not extends Rqueue');
-				}
-			}
-			// 主循环
-			Rqueue::loop();
-			exit(0);
+			Rqueue::run();
 			break;
 		case 'stop':
 			$pid = @file_get_contents(RQUEUE_PID_FILE);
