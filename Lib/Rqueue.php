@@ -29,20 +29,19 @@ abstract class Rqueue
     const RESTART_COUNT_MAX = 5;
 
     // log类
-    public static $Rlog = null;
+    protected static $Rlog = null;
 
     // 主进程id
-    public static $master_pid = 0;
+    protected static $master_pid = 0;
 
     // 服务运行状态
-    public static $service_status = self::STATUS_STARTING;
-
+    protected static $service_status = self::STATUS_STARTING;
 
     // 子进程map,array('pid'=>'worker_name')
-    public static $pid_worker = array();
+    protected static $pid_worker = array();
 
     // 子进程信息 array('worker_name'=>array('pid'=>0, 'restart_time'=>0, 'restart_count'=>0))
-    public static $worker_info = array();
+    protected static $worker_info = array();
 
     public static function set_log($log)
     {
@@ -128,7 +127,7 @@ abstract class Rqueue
         // 标记服务为runing状态
         self::$service_status = self::STATUS_RUNNING;
         // 关闭标准输出
-        self::resetStdFd();
+        self::close_std_output();
         // 主循环
         self::loop();
         exit(0);
@@ -406,7 +405,7 @@ abstract class Rqueue
      * 关闭标准输入输出
      * @return void
      */
-    protected static function resetStdFd($force = false)
+    protected static function close_std_output($force = false)
     {
         // 如果此进程配置是no_debug，则关闭输出
         /*if(!$force)
