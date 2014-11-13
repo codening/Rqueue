@@ -3,12 +3,17 @@
 define("DS", DIRECTORY_SEPARATOR);
 define("RQUEUE_ROOT_DIR", __DIR__);
 define("RQUEUE_WORK_DIR", RQUEUE_ROOT_DIR.DS."Workers".DS);
-define("RQUEUE_PID_FILE", RQUEUE_ROOT_DIR.DS."temp".DS."rqueue.pid");
+
 define('IPC_KEY', fileinode(RQUEUE_ROOT_DIR));
 define('DEFAULT_SHM_SIZE', 393216);
 
 try {
 	include(RQUEUE_ROOT_DIR.DS."Lib".DS."Rlog".DS."Rlog.php");
+
+	include(RQUEUE_ROOT_DIR.DS."Lib".DS."Config.php");
+
+	// 载入work基类
+	include(RQUEUE_ROOT_DIR.DS."Lib".DS."Rqueue.php");
 
 	$Rlog = Rlog::instance(array('DRIVER'=>'file', 'LOG_PATH'=>RQUEUE_ROOT_DIR.DS."logs", 'LOG_MULTI'=>false));
 	// $Rlog->debug('server',"nihaowa");
@@ -31,9 +36,57 @@ try {
 	    exit("Rqueue PHP >= 5.3.0 required ".PHP_EOL);
 	}
 
-	// 载入work基类
-	include(RQUEUE_ROOT_DIR.DS."Lib".DS."Rqueue.php");
-	
+	// 获取配置文件实例
+	Config::instance();
+	if(!($pid_file = Config::get('Rqueue.pid_file')))
+	{
+	    $pid_file = RQUEUE_ROOT_DIR.DS."temp".DS."rqueue.pid";
+	}
+	define('RQUEUE_PID_FILE', $pid_file);
+
+	// ==log-dir==
+	if(!($log_dir = Config::get('Rqueue.log_dir')))
+	{
+	    $log_dir = RQUEUE_ROOT_DIR.DS."logs";
+	}
+	define('RQUEUE_LOG_DIR', $log_dir . '/');
+
+	//检查pid对应的进程是否存在，不存在删除PID文件
+	if($cmd != 'status' && is_file(RQUEUE_PID_FILE))
+	{
+	    //检查权限
+	    if(!posix_access(RQUEUE_PID_FILE, POSIX_W_OK))
+	    {
+	        if($stat = stat(RQUEUE_PID_FILE))
+	        {
+	            if(($start_pwuid = posix_getpwuid($stat['uid'])) && ($current_pwuid = posix_getpwuid(posix_getuid())))
+	            {
+	                exit("\n\033[31;40mRqueued is started by user {$start_pwuid['name']}, {$current_pwuid['name']} can not $cmd Workerman, Permission denied\033[0m\n\n\033[31;40mRqueued $cmd failed\033[0m\n\n");
+	            }
+	        }
+	        exit("\033[31;40mCan not $cmd Rqueue, Permission denied\033[0m\n");
+	    }
+	    //检查pid进程是否存在
+	    if($pid = @file_get_contents(RQUEUE_PID_FILE))
+	    {
+	        if(false === posix_kill($pid, 0))
+	        {
+	            if(!unlink(RQUEUE_PID_FILE))
+	            {
+	                exit("\033[31;40mCan not $cmd Rqueue\033[0m\n\n");
+	            }
+	        }
+	    }
+	}
+
+	// 必须是root启动
+	if($user_info = posix_getpwuid(posix_getuid()))
+	{
+	    if($user_info['name'] !== 'root')
+	    {
+	        exit("\033[31;40mYou should ran Rqueue as root , Permission denied\033[0m\n");
+	    }
+	}
 
 	switch ($cmd) {
 		case 'start':

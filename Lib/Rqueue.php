@@ -373,6 +373,20 @@ abstract class Rqueue
     }
 
     /**
+     * 强制杀死进程
+     * @param int $pid
+     * @return void
+     */
+    public static function force_kill_worker($pid)
+    {
+        if(posix_kill($pid, 0))
+        {
+            self::notice("Kill workers $pid force!");
+            posix_kill($pid, SIGKILL);
+        }
+    }
+
+    /**
      * 终止所有work进程
      */
     protected static function stop_workers()
