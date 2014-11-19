@@ -23,31 +23,20 @@ class UserLog extends Rqueue
 		$Redis = self::get_redis_instance();
 
 		if ($Redis->llen(self::REDIS_KEY) == 0) {
-			sleep(1);
-			return true;
+			if ($Redis->llen(self::REDIS_PROCESS_KEY) != 0) {
+				$Redis->rpoplpush(self::REDIS_PROCESS_KEY, self::REDIS_KEY);
+			} else {
+				sleep(1);
+				return true;
+			}
 		}
 
-		$data = $Redis->brpoplpush(self::REDIS_KEY, self::REDIS_PROCESS_KEY, 0);
-		// $data = $Redis->rpoplpush(self::REDIS_KEY, self::REDIS_PROCESS_KEY);
-
-		$rt = $this->do_work($data);
-
-		// 如果执行成功，则将该值删除
-		if ($rt) {
-			$Redis->lRem(self::REDIS_PROCESS_KEY, $data, 0);
-		} else {
-			// $Redis->brpoplpush(self::REDIS_PROCESS_KEY, self::REDIS_ERROR_KEY, 0);
-			$Redis->rpoplpush(self::REDIS_PROCESS_KEY, self::REDIS_ERROR_KEY);
-		}
-
-		// $rt = static::$Rlog->info('UserLog', $data);
-		// if (!$rt) static::$Rlog->error('UserLog', $data);
-		// echo static::$count.PHP_EOL;
-		// if (static::$count >= 10) exit(" exec ".static::$count." . user log is stop".PHP_EOL);
+		$this->do_work();
 	}
 
-	public function do_work()
+	public function _do($data)
 	{
+		return true;
 		$random = rand(1,2);
 		if ($random == 1) {
 			return true;
@@ -56,13 +45,45 @@ class UserLog extends Rqueue
 		}
 	}
 
+	public function do_work()
+	{
+		$Redis = self::get_redis_instance();
+		$data = $Redis->rpoplpush(self::REDIS_KEY, self::REDIS_PROCESS_KEY);
+
+		// 处理数据
+		$rt = $this->_do($data);
+		if ($rt) {
+			$this->success();
+		} else {
+			$this->error();
+		}
+	}
+
+	public function success()
+	{
+		$Redis = self::get_redis_instance();
+		$Redis->rpoplpush(self::REDIS_PROCESS_KEY, self::REDIS_SUCCESS_KEY);
+	}
+
+	public function error()
+	{
+		$Redis = self::get_redis_instance();
+		$Redis->rpoplpush(self::REDIS_PROCESS_KEY, self::REDIS_ERROR_KEY);
+	}
+
 	public static function get_redis_instance()
 	{
 		if (!empty(self::$instance)) return self::$instance;
 
 		try {
+			$redis_conf['host'] = '127.0.0.1';
+			$redis_conf['port'] = '6379';
+			$redis_conf['timeout'] = '2.5';
+			$redis_conf['auth'] = 'test';
 			$Redis = new redis();
-			$Redis->connect('192.168.140.129', 6379, 2.5);
+			$Redis->connect($redis_conf['host'], $redis_conf['port'], $redis_conf['timeout']);
+			if (isset($redis_conf['auth']) && !empty($redis_conf['auth'])) $Redis->auth($redis_conf['auth']);
+			
 			self::$instance = $Redis;
 			return self::$instance;
 		}

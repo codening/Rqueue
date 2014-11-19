@@ -19,7 +19,7 @@ try {
 
 	if(empty($argv[1]))
 	{
-	    echo "Usage: Rqueue {start|stop|restart|reload|kill|status}".PHP_EOL;
+	    echo "Usage: Rqueue {start|stop|restart}".PHP_EOL;
 	    exit;
 	}
 
@@ -89,8 +89,6 @@ try {
 
 	switch ($cmd) {
 		case 'start':
-			// $workers_file = get_worker_file();
-			// 设置log日志
 			Rqueue::run();
 			break;
 		case 'stop':
@@ -105,7 +103,8 @@ try {
 			stop_and_wait();
 			Rqueue::run();
         	break;
-		case 'reload':
+        	// 暂不实现reload
+/*		case 'reload':
 			$pid = @file_get_contents(RQUEUE_PID_FILE);
 	        if(empty($pid))
 	        {
@@ -114,10 +113,7 @@ try {
 
 			posix_kill($pid, SIGHUP);
 			echo "reload Rqueued\n";
-			break;
-		case 'status':
-			var_dump(Rqueue::$pid_workers);
-			break;
+			break;*/
 		default:
 			# code...
 			break;

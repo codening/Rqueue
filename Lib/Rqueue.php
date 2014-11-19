@@ -296,25 +296,9 @@ abstract class Rqueue
                 break;
             // 平滑重启server信号
             case SIGHUP:
-                self::notice('Rqueue is reloading', true);
-                self::restart_workers();
-                // Lib\Config::reload();
-                // self::notice("Workerman reloading");
-                // $pid_worker_name_map = self::getPidWorkerNameMap();
-                // $pids_to_restart = array();
-                // foreach($pid_worker_name_map as $pid=>$worker_name)
-                // {
-                //     // 如果对应进程配置了不热启动则不重启对应进程
-                //     if(Lib\Config::get($worker_name.'.no_reload'))
-                //     {
-                //         // 发送reload信号，以便触发onReload方法
-                //         posix_kill($pid, SIGHUP);
-                //         continue;
-                //     }
-                //     $pids_to_restart[] = $pid;
-                // }
-                // self::addToRestartPids($pids_to_restart);
-                // self::restartPids();
+                // 暂不实现
+                // self::notice('Rqueue is reloading', true);
+                // self::restart_workers();
                 break;
         }
     }
