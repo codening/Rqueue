@@ -28,9 +28,6 @@ abstract class Rqueue
     // 进程最大重启次数
     const RESTART_COUNT_MAX = 5;
 
-    // log类
-    protected static $Rlog = null;
-
     // 主进程id
     protected static $master_pid = 0;
 
@@ -42,11 +39,6 @@ abstract class Rqueue
 
     // 子进程信息 array('worker_name'=>array('pid'=>0, 'restart_time'=>0, 'restart_count'=>0))
     protected static $worker_info = array();
-
-    public static function set_log($log)
-    {
-        static::$Rlog = $log;
-    }
 
     abstract function work();
 
@@ -112,8 +104,7 @@ abstract class Rqueue
 
     public static function run()
     {
-        static::$Rlog->info('server',"Rqueued is starting ...");
-        echo 'Rqueued is starting ...'.PHP_EOL;
+        self::notice("Rqueued is starting ...", true);
         // Rqueue初始化
         self::init();
         // 作为daemonize启动
@@ -150,7 +141,7 @@ abstract class Rqueue
             if ($_obj instanceof Rqueue) {
                 self::create_work_one($_obj);
             } else {
-                static::$Rlog->notice('server', $file.' is not extends Rqueue');
+                self::notice($file.' is not extends Rqueue', true);
             }
         }
     }
@@ -182,15 +173,15 @@ abstract class Rqueue
             static::ignore_signal();
             $pid = posix_getpid();
 
-            static::$Rlog->info('server',"Process {$pid} was created");
-            echo PHP_EOL."\033[32;40m * Process ".get_class($obj)." [{$pid}] is runing\033[0m";
+            self::notice("Process ".get_class($obj)." [{$pid}] is runing");
+            echo PHP_EOL." * Process ".get_class($obj)." [{$pid}] \t [\033[32;40m ok \033[0m]";
             while(true)
             {
                 $rt = $obj->work();
             }
             exit(0);
         } else {
-            static::$Rlog->notice('server',"create worker fail");
+            self::notice("create worker fail", true);
         }
     }
 
@@ -223,7 +214,7 @@ abstract class Rqueue
             // 出错
             if($pid < 0)
             {
-                static::$Rlog->notice('server','pcntl_waitpid return '.$pid.' and pcntl_get_last_error = ' . pcntl_get_last_error());
+                self::notice('pcntl_waitpid return '.$pid.' and pcntl_get_last_error = ' . pcntl_get_last_error(), true);
                 return $pid;
             }
 
@@ -231,7 +222,7 @@ abstract class Rqueue
             if(self::$service_status != self::STATUS_SHUTDOWN)
             {
                 sleep(5);
-                static::$Rlog->notice('server', 'process '.static::$pid_worker[$pid].' is restart.');
+                self::notice('process '.static::$pid_worker[$pid].' is restart.', true);
 
                 $_obj = new static::$pid_worker[$pid]();
 
@@ -241,14 +232,14 @@ abstract class Rqueue
                 if ($_obj instanceof Rqueue) {
                     self::create_work_one($_obj);
                 } else {
-                    static::$Rlog->notice('server', $work_info[$pid]['work_name'].' is not extends Rqueue');
+                    self::notice($work_info[$pid]['work_name'].' is not extends Rqueue', true);
                 }
             }
             // 判断是否都重启完毕
             else
             {
                 // 发送提示
-                static::$Rlog->notice('server', "Rqueue is stoped");
+                self::notice("Rqueue is stoped", true);
                 // 删除pid文件
                 @unlink(RQUEUE_PID_FILE);
                 exit(0);
@@ -292,7 +283,7 @@ abstract class Rqueue
         {
             // 停止服务信号
             case SIGINT:
-                static::$Rlog->notice('server', 'Rqueue is shutting down');
+                self::notice('Rqueue is shutting down', true);
                 self::stop_workers();
                 break;
             // 测试用
@@ -305,7 +296,7 @@ abstract class Rqueue
                 break;
             // 平滑重启server信号
             case SIGHUP:
-                static::$Rlog->notice('server', 'Rqueue is reloading');
+                self::notice('Rqueue is reloading', true);
                 self::restart_workers();
                 // Lib\Config::reload();
                 // self::notice("Workerman reloading");
@@ -436,5 +427,23 @@ abstract class Rqueue
         // 将标准输出重定向到/dev/null
         $STDOUT = fopen('/dev/null',"rw+");
         $STDERR = fopen('/dev/null',"rw+");
+    }
+
+    /**
+     * notice,记录到日志
+     * @param string $msg
+     * @param bool $display
+     * @return void
+     */
+    public static function notice($msg, $display = false)
+    {
+        Log::add("Server:".$msg);
+        if($display)
+        {
+            if(self::$service_status == self::STATUS_STARTING)
+            {
+                echo($msg."\n");
+            }
+        }
     }
 }
